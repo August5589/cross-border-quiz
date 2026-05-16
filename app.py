@@ -21,7 +21,10 @@ def hash_password(password):
 app = Flask(__name__)
 app.secret_key = 'cross-border-theory-2026-secret-key-change-in-production'
 
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quiz.db')
+# Use Render persistent disk if available, otherwise local directory
+DATA_DIR = os.environ.get('RENDER_DISK_PATH', os.path.dirname(os.path.abspath(__file__)))
+os.makedirs(DATA_DIR, exist_ok=True)
+DATABASE = os.path.join(DATA_DIR, 'quiz.db')
 QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cleaned_questions.json')
 
 PER_PAGE = 5
