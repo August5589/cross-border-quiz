@@ -22,7 +22,7 @@ app = Flask(__name__)
 app.secret_key = 'cross-border-theory-2026-secret-key-change-in-production'
 
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quiz.db')
-QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cleaned_questions.json')
+QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cleaned_questions.json')
 
 PER_PAGE = 5
 EXAM_SIZE = 100
