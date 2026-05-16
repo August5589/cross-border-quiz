@@ -1,3 +1,4 @@
 flask>=3.0
 werkzeug>=3.0
 waitress>=2.1
+libsql-experimental>=0.1.0

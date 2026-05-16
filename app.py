@@ -21,11 +21,42 @@ def hash_password(password):
 app = Flask(__name__)
 app.secret_key = 'cross-border-theory-2026-secret-key-change-in-production'
 
-# Use Render persistent disk if available, otherwise local directory
+# ── Database connection ────────────────────────────────────
+
+QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cleaned_questions.json')
+
+# Turso (cloud SQLite) for production; falls back to local SQLite for dev
+TURSO_URL = os.environ.get('TURSO_DATABASE_URL', '')
+TURSO_TOKEN = os.environ.get('TURSO_AUTH_TOKEN', '')
+
+try:
+    import libsql_experimental as libsql
+    _HAVE_LIBSQL = True
+except ImportError:
+    libsql = None
+    _HAVE_LIBSQL = False
+
+USE_TURSO = bool(_HAVE_LIBSQL and TURSO_URL and TURSO_TOKEN)
+
+# Local SQLite fallback
 DATA_DIR = os.environ.get('RENDER_DISK_PATH', os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(DATA_DIR, exist_ok=True)
 DATABASE = os.path.join(DATA_DIR, 'quiz.db')
-QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cleaned_questions.json')
+
+
+def connect_db():
+    """Return a database connection (Turso or local SQLite)."""
+    if USE_TURSO:
+        conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+        conn.row_factory = sqlite3.Row
+        return conn
+    else:
+        conn = sqlite3.connect(DATABASE)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
 
 PER_PAGE = 5
 EXAM_SIZE = 100
@@ -35,10 +66,7 @@ EXAM_SIZE = 100
 
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL")
-        g.db.execute("PRAGMA foreign_keys=ON")
+        g.db = connect_db()
     return g.db
 
 
@@ -50,26 +78,24 @@ def close_db(exception):
 
 
 def init_db():
-    db = sqlite3.connect(DATABASE)
-    db.executescript('''
-        CREATE TABLE IF NOT EXISTS users (
+    db = connect_db()
+    statements = [
+        '''CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             is_admin INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS questions (
+        )''',
+        '''CREATE TABLE IF NOT EXISTS questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             qtype TEXT NOT NULL,
             question_text TEXT NOT NULL,
             options TEXT NOT NULL,
             answer TEXT NOT NULL,
             original_num INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS user_answers (
+        )''',
+        '''CREATE TABLE IF NOT EXISTS user_answers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             question_id INTEGER NOT NULL,
@@ -79,28 +105,28 @@ def init_db():
             answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (question_id) REFERENCES questions(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS wrong_questions (
+        )''',
+        '''CREATE TABLE IF NOT EXISTS wrong_questions (
             user_id INTEGER NOT NULL,
             question_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (user_id, question_id),
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (question_id) REFERENCES questions(id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_user_answers_user ON user_answers(user_id);
-        CREATE INDEX IF NOT EXISTS idx_user_answers_question ON user_answers(question_id);
-        CREATE INDEX IF NOT EXISTS idx_wrong_questions_user ON wrong_questions(user_id);
-    ''')
+        )''',
+    ]
+    for stmt in statements:
+        db.execute(stmt)
+    db.execute('CREATE INDEX IF NOT EXISTS idx_user_answers_user ON user_answers(user_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_user_answers_question ON user_answers(question_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_wrong_questions_user ON wrong_questions(user_id)')
     db.commit()
     db.close()
 
 
 def import_questions():
     """Import questions from cleaned JSON into SQLite."""
-    db = sqlite3.connect(DATABASE)
+    db = connect_db()
     count = db.execute('SELECT COUNT(*) FROM questions').fetchone()[0]
     if count > 0:
         db.close()
@@ -127,7 +153,7 @@ def import_questions():
 
 def create_admin_user():
     """Create default admin account if not exists."""
-    db = sqlite3.connect(DATABASE)
+    db = connect_db()
     exists = db.execute('SELECT id FROM users WHERE username = ?', ('admin',)).fetchone()
     if not exists:
         db.execute(
