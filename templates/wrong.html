@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}错题集锦 - 跨境理论题刷题系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📌 错题集锦</h1>
+    <p class="subtitle">答对后自动从错题本移除</p>
+</div>
+
+{% if questions %}
+<div class="questions-list" id="questions-container">
+    {% for q in questions %}
+    <div class="question-card" id="q-{{ q.id }}" data-question-id="{{ q.id }}" data-qtype="{{ q.qtype }}" data-answered="false">
+        <div class="q-header">
+            <span class="q-num">{{ (page - 1) * 5 + loop.index }}.</span>
+            <span class="q-type-badge type-{{ q.qtype }}">
+                {% if q.qtype == 'single' %}单选题{% elif q.qtype == 'multi' %}多选题{% else %}判断题{% endif %}
+            </span>
+        </div>
+        <div class="q-body">
+            <p class="q-text">{{ q.question_text }}</p>
+            <div class="q-options">
+                {% for opt in q.options %}
+                <label class="option-item" data-letter="{{ opt[0] }}">
+                    {% if q.qtype == 'multi' %}
+                    <input type="checkbox" name="q-{{ q.id }}" value="{{ opt[0] }}" class="option-input option-checkbox">
+                    {% else %}
+                    <input type="radio" name="q-{{ q.id }}" value="{{ opt[0] }}" class="option-input option-radio">
+                    {% endif %}
+                    <span class="option-text">{{ opt }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="q-footer">
+            <button class="btn btn-check" onclick="checkWrongAnswer(this, {{ q.id }}, '{{ q.qtype }}')" data-checked="false">提交答案</button>
+            <div class="q-result" style="display:none;"></div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="{{ url_for('wrong_questions', page=page-1) }}" class="btn btn-page">上一页</a>
+    {% else %}
+    <span class="btn btn-page disabled">上一页</span>
+    {% endif %}
+    <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
+    {% if page < total_pages %}
+    <a href="{{ url_for('wrong_questions', page=page+1) }}" class="btn btn-page">下一页</a>
+    {% else %}
+    <span class="btn btn-page disabled">下一页</span>
+    {% endif %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🎉</div>
+    <h2>暂无错题</h2>
+    <p>去练习模式做几道题吧！</p>
+    <a href="{{ url_for('practice') }}" class="btn btn-primary">前往练习</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function checkWrongAnswer(btn, questionId, qtype) {
+    if (btn.dataset.checked === 'true') return;
+
+    const card = document.getElementById('q-' + questionId);
+    let answer = '';
+
+    if (qtype === 'multi') {
+        const checked = card.querySelectorAll('.option-checkbox:checked');
+        if (checked.length === 0) { alert('请至少选择一个选项'); return; }
+        answer = Array.from(checked).map(cb => cb.value).join('');
+    } else {
+        const selected = card.querySelector('.option-radio:checked');
+        if (!selected) { alert('请选择一个选项'); return; }
+        answer = selected.value;
+    }
+
+    btn.dataset.checked = 'true';
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+
+    fetch('/wrong/check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question_id: questionId, answer: answer})
+    })
+    .then(r => r.json())
+    .then(data => {
+        const resultDiv = card.querySelector('.q-result');
+        resultDiv.style.display = 'block';
+
+        if (data.is_correct) {
+            resultDiv.innerHTML = '<span class="result-correct">✓ 正确 — 已从错题本移除</span>';
+            card.classList.add('correct');
+        } else {
+            resultDiv.innerHTML = '<span class="result-wrong">✗ 错误</span> <span class="result-answer">正确答案：' + data.correct_answer + '</span>';
+            card.classList.add('wrong');
+            const userAnswer = answer;
+            card.querySelectorAll('.option-item').forEach(item => {
+                const letter = item.dataset.letter || item.querySelector('input').value;
+                if (data.correct_answer.includes(letter)) item.classList.add('option-correct');
+                if (userAnswer.includes(letter) && !data.correct_answer.includes(letter)) item.classList.add('option-incorrect');
+            });
+        }
+
+        const badge = document.querySelector('.badge');
+        if (badge) {
+            badge.textContent = data.wrong_count;
+            badge.style.display = data.wrong_count === 0 ? 'none' : '';
+        }
+
+        btn.textContent = data.is_correct ? '✓ 已移除' : '✗ 错误';
+        btn.classList.add(data.is_correct ? 'btn-correct' : 'btn-wrong');
+
+        // If correct, fade out the card after a delay
+        if (data.removed) {
+            setTimeout(() => {
+                card.style.transition = 'opacity 0.5s, max-height 0.5s';
+                card.style.opacity = '0';
+                card.style.maxHeight = '0';
+                card.style.overflow = 'hidden';
+                card.style.margin = '0';
+                card.style.padding = '0';
+                card.style.border = 'none';
+                setTimeout(() => {
+                    card.remove();
+                    // If no more questions, reload
+                    const remaining = document.querySelectorAll('.question-card').length;
+                    if (remaining === 0) location.reload();
+                }, 500);
+            }, 1500);
+        }
+    });
+}
+</script>
+{% endblock %}

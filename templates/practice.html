@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}练习模式 - 跨境理论题刷题系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>练习模式</h1>
+    <div class="type-filters">
+        <a href="{{ url_for('practice', type='all') }}" class="filter-btn {{ 'active' if qtype == 'all' }}">全部</a>
+        <a href="{{ url_for('practice', type='single') }}" class="filter-btn {{ 'active' if qtype == 'single' }}">单选题 ({{ type_counts.single }})</a>
+        <a href="{{ url_for('practice', type='multi') }}" class="filter-btn {{ 'active' if qtype == 'multi' }}">多选题 ({{ type_counts.multi }})</a>
+        <a href="{{ url_for('practice', type='judge') }}" class="filter-btn {{ 'active' if qtype == 'judge' }}">判断题 ({{ type_counts.judge }})</a>
+    </div>
+</div>
+
+{% if questions %}
+<div class="questions-list" id="questions-container">
+    {% for q in questions %}
+    <div class="question-card" id="q-{{ q.id }}" data-question-id="{{ q.id }}" data-qtype="{{ q.qtype }}" data-answered="false">
+        <div class="q-header">
+            <span class="q-num">{{ (page - 1) * 5 + loop.index }}.</span>
+            <span class="q-type-badge type-{{ q.qtype }}">
+                {% if q.qtype == 'single' %}单选题{% elif q.qtype == 'multi' %}多选题{% else %}判断题{% endif %}
+            </span>
+            {% if q.id in answered_ids %}
+            <span class="q-done">已答</span>
+            {% endif %}
+        </div>
+        <div class="q-body">
+            <p class="q-text">{{ q.question_text }}</p>
+            <div class="q-options">
+                {% for opt in q.options %}
+                <label class="option-item" data-letter="{{ opt[0] if opt[1] in '.、' else '' }}">
+                    {% if q.qtype == 'multi' %}
+                    <input type="checkbox" name="q-{{ q.id }}" value="{{ opt[0] }}" class="option-input option-checkbox">
+                    {% else %}
+                    <input type="radio" name="q-{{ q.id }}" value="{{ opt[0] }}" class="option-input option-radio">
+                    {% endif %}
+                    <span class="option-text">{{ opt }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="q-footer">
+            <button class="btn btn-check" onclick="checkAnswer(this, {{ q.id }}, '{{ q.qtype }}')" data-checked="false">提交答案</button>
+            <div class="q-result" style="display:none;"></div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="{{ url_for('practice', type=qtype, page=page-1) }}" class="btn btn-page">上一页</a>
+    {% else %}
+    <span class="btn btn-page disabled">上一页</span>
+    {% endif %}
+
+    <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
+
+    {% if page < total_pages %}
+    <a href="{{ url_for('practice', type=qtype, page=page+1) }}" class="btn btn-page">下一页</a>
+    {% else %}
+    <span class="btn btn-page disabled">下一页</span>
+    {% endif %}
+</div>
+{% else %}
+<div class="empty-state">
+    <p>暂无题目</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function checkAnswer(btn, questionId, qtype) {
+    if (btn.dataset.checked === 'true') return;
+
+    const card = document.getElementById('q-' + questionId);
+    let answer = '';
+
+    if (qtype === 'multi') {
+        const checked = card.querySelectorAll('.option-checkbox:checked');
+        if (checked.length === 0) {
+            alert('请至少选择一个选项');
+            return;
+        }
+        answer = Array.from(checked).map(cb => cb.value).join('');
+    } else {
+        const selected = card.querySelector('.option-radio:checked');
+        if (!selected) {
+            alert('请选择一个选项');
+            return;
+        }
+        answer = selected.value;
+    }
+
+    btn.dataset.checked = 'true';
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+
+    fetch('/check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question_id: questionId, answer: answer})
+    })
+    .then(r => r.json())
+    .then(data => {
+        const resultDiv = card.querySelector('.q-result');
+        resultDiv.style.display = 'block';
+
+        // Highlight correct/incorrect
+        if (data.is_correct) {
+            resultDiv.innerHTML = '<span class="result-correct">✓ 正确</span>';
+            card.classList.add('correct');
+        } else {
+            resultDiv.innerHTML = '<span class="result-wrong">✗ 错误</span> <span class="result-answer">正确答案：' + data.correct_answer + '</span>';
+            card.classList.add('wrong');
+
+            // Highlight wrong user selection
+            const userAnswer = answer;
+            card.querySelectorAll('.option-item').forEach(item => {
+                const letter = item.dataset.letter || item.querySelector('input').value;
+                if (data.correct_answer.includes(letter)) {
+                    item.classList.add('option-correct');
+                }
+                if (userAnswer.includes(letter) && !data.correct_answer.includes(letter)) {
+                    item.classList.add('option-incorrect');
+                }
+            });
+        }
+
+        // Update wrong count in sidebar
+        const badge = document.querySelector('.badge');
+        if (badge) {
+            badge.textContent = data.wrong_count;
+            if (data.wrong_count === 0) badge.style.display = 'none';
+            else badge.style.display = '';
+        }
+
+        btn.textContent = data.is_correct ? '✓ 正确' : '✗ 错误';
+        btn.classList.add(data.is_correct ? 'btn-correct' : 'btn-wrong');
+    })
+    .catch(err => {
+        alert('提交失败: ' + err.message);
+        btn.dataset.checked = 'false';
+        btn.disabled = false;
+        btn.textContent = '提交答案';
+    });
+}
+</script>
+{% endblock %}

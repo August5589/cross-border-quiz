@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}考试模式 - 跨境理论题刷题系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📋 考试模式</h1>
+    <p class="subtitle">随机抽取100题，交卷后显示成绩</p>
+</div>
+
+<div id="exam-intro" class="exam-intro">
+    <div class="intro-card">
+        <h3>考试说明</h3>
+        <ul>
+            <li>系统将从题库中随机抽取 <strong>100道题</strong> 组成试卷</li>
+            <li>考试期间<strong>不显示</strong>正确答案</li>
+            <li>完成所有题目后点击"交卷"查看成绩</li>
+            <li>未作答的题目计为错误</li>
+        </ul>
+        <button class="btn btn-primary btn-large" onclick="startExam()">开始考试</button>
+    </div>
+</div>
+
+<div id="exam-content" style="display:none;">
+    <div class="exam-header">
+        <span id="exam-progress">已答：0 / 0</span>
+        <button class="btn btn-danger" onclick="submitExam()">交 卷</button>
+    </div>
+    <div class="questions-list" id="exam-questions"></div>
+</div>
+
+<div id="exam-result" style="display:none;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let examQuestions = [];
+let examSubmitted = false;
+
+function startExam() {
+    document.getElementById('exam-intro').style.display = 'none';
+
+    fetch('/exam/start', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+        examQuestions = data.questions;
+        renderExam();
+        document.getElementById('exam-content').style.display = 'block';
+        document.getElementById('exam-progress').textContent = '已答：0 / ' + examQuestions.length;
+        updateProgress();
+    });
+}
+
+function renderExam() {
+    const container = document.getElementById('exam-questions');
+    container.innerHTML = examQuestions.map(q => {
+        const optHTML = q.options.map(opt => {
+            const letter = opt[0];
+            const inputType = q.qtype === 'multi' ? 'checkbox' : 'radio';
+            return `
+                <label class="option-item" data-letter="${letter}">
+                    <input type="${inputType}" name="q-${q.id}" value="${letter}" class="option-input"
+                           onchange="updateProgress()">
+                    <span class="option-text">${opt}</span>
+                </label>`;
+        }).join('');
+
+        const typeLabel = q.qtype === 'single' ? '单选题' : q.qtype === 'multi' ? '多选题' : '判断题';
+        return `
+            <div class="question-card exam-card" id="eq-${q.id}">
+                <div class="q-header">
+                    <span class="q-num">${q.exam_num}.</span>
+                    <span class="q-type-badge type-${q.qtype}">${typeLabel}</span>
+                </div>
+                <div class="q-body">
+                    <p class="q-text">${q.question_text}</p>
+                    <div class="q-options">${optHTML}</div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function updateProgress() {
+    let answered = 0;
+    document.querySelectorAll('#exam-questions .question-card').forEach(card => {
+        const checked = card.querySelectorAll('input:checked');
+        if (checked.length > 0) answered++;
+    });
+    document.getElementById('exam-progress').textContent = '已答：' + answered + ' / ' + examQuestions.length;
+}
+
+function submitExam() {
+    if (examSubmitted) return;
+
+    const unanswered = document.querySelectorAll('#exam-questions .question-card').length -
+        Array.from(document.querySelectorAll('#exam-questions .question-card')).filter(card =>
+            card.querySelectorAll('input:checked').length > 0).length;
+
+    if (unanswered > 0) {
+        if (!confirm('还有 ' + unanswered + ' 道题未作答，确定交卷吗？（未作答计为错误）')) return;
+    } else {
+        if (!confirm('确定交卷吗？')) return;
+    }
+
+    examSubmitted = true;
+
+    // Collect answers
+    const answers = {};
+    examQuestions.forEach(q => {
+        const card = document.getElementById('eq-' + q.id);
+        const checked = card.querySelectorAll('input:checked');
+        if (checked.length > 0) {
+            answers[q.id] = Array.from(checked).map(c => c.value).join('');
+        } else {
+            answers[q.id] = '';
+        }
+    });
+
+    fetch('/exam/submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({answers: answers})
+    })
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('exam-content').style.display = 'none';
+        showResult(data);
+    });
+}
+
+function showResult(data) {
+    const container = document.getElementById('exam-result');
+    container.style.display = 'block';
+
+    let html = `
+    <div class="result-summary">
+        <h2>考试成绩</h2>
+        <div class="score-circle ${data.score >= 60 ? 'pass' : 'fail'}">
+            <span class="score-number">${data.score}</span>
+            <span class="score-label">分</span>
+        </div>
+        <p class="score-detail">答对 <strong>${data.correct_count}</strong> / ${data.total} 题</p>
+        <a href="/exam" class="btn btn-primary">重新考试</a>
+        <a href="/practice" class="btn btn-outline">返回练习</a>
+    </div>
+
+    <h3 class="result-detail-title">答题详情</h3>
+    <div class="questions-list">`;
+
+    data.results.forEach((r, i) => {
+        const statusClass = r.is_correct ? 'correct' : 'wrong';
+        const statusText = r.is_correct ? '✓' : '✗';
+        const userAnsDisplay = r.user_answer || '（未作答）';
+        const typeLabel = r.qtype === 'single' ? '单选' : r.qtype === 'multi' ? '多选' : '判断';
+
+        html += `
+        <div class="question-card ${statusClass}">
+            <div class="q-header">
+                <span class="q-num">${i + 1}.</span>
+                <span class="q-type-badge type-${r.qtype}">${typeLabel}</span>
+                <span class="result-mark">${statusText}</span>
+            </div>
+            <div class="q-body">
+                <p class="q-text">${r.question_text}</p>
+                <div class="q-options">
+                    ${r.options.map(opt => {
+                        const letter = opt[0];
+                        let cls = '';
+                        if (r.correct_answer.includes(letter) && r.user_answer.includes(letter)) cls = 'option-correct';
+                        else if (r.correct_answer.includes(letter)) cls = 'option-correct';
+                        else if (r.user_answer.includes(letter) && !r.correct_answer.includes(letter)) cls = 'option-incorrect';
+                        return `<div class="option-item ${cls}"><span class="option-text">${opt}</span></div>`;
+                    }).join('')}
+                </div>
+                <div class="answer-info">
+                    <p><strong>你的答案：</strong><span class="${r.is_correct ? 'text-correct' : 'text-wrong'}">${userAnsDisplay}</span></p>
+                    <p><strong>正确答案：</strong><span class="text-correct">${r.correct_answer}</span></p>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+    container.scrollIntoView({behavior: 'smooth'});
+}
+</script>
+{% endblock %}

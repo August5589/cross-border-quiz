@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}跨境理论题刷题系统{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>📚 刷题系统</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('practice') }}" class="nav-item {% if request.endpoint == 'practice' %}active{% endif %}">
+                    <span class="nav-icon">📝</span> 练习模式
+                </a>
+                <a href="{{ url_for('wrong_questions') }}" class="nav-item {% if request.endpoint == 'wrong_questions' %}active{% endif %}">
+                    <span class="nav-icon">📌</span> 错题集锦
+                    {% if wrong_count is defined and wrong_count > 0 %}
+                    <span class="badge">{{ wrong_count }}</span>
+                    {% endif %}
+                </a>
+                <a href="{{ url_for('exam_page') }}" class="nav-item {% if request.endpoint == 'exam_page' %}active{% endif %}">
+                    <span class="nav-icon">📋</span> 考试模式
+                </a>
+                {% if user and user['is_admin'] %}
+                <a href="{{ url_for('admin_panel') }}" class="nav-item {% if request.endpoint == 'admin_panel' %}active{% endif %}">
+                    <span class="nav-icon">⚙️</span> 管理后台
+                </a>
+                {% endif %}
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <span class="user-avatar">👤</span>
+                    <span class="user-name">{{ user['username'] if user else '' }}</span>
+                    {% if user and user['is_admin'] %}
+                    <span class="admin-tag">管理员</span>
+                    {% endif %}
+                </div>
+                <a href="{{ url_for('logout') }}" class="logout-btn">退出登录</a>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
