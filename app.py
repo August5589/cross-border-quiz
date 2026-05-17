@@ -194,6 +194,29 @@ class _TursoHTTPConnection:
             return _TursoHTTPCursor(resp_obj.get("result", {}))
         return _TursoHTTPCursor(None)
 
+    def executemany(self, sql, params_list):
+        """Execute the same SQL with multiple param sets in a single pipeline request."""
+        requests = []
+        for params in params_list:
+            args = [self._to_arg(p) for p in params]
+            requests.append({"type": "execute", "stmt": {"sql": sql, "args": args}})
+
+        body = json.dumps({"requests": requests}).encode("utf-8")
+        req = urllib.request.Request(self._url, data=body, headers=self._headers)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            ebody = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            raise RuntimeError(f"Turso HTTP {e.code}: {ebody[:500]}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Turso unreachable: {e.reason}")
+
+        for r in data.get("results", []):
+            if r.get("type") != "ok":
+                raise RuntimeError(f"Turso error in batch: {r}")
+        return _TursoHTTPCursor(None)
+
     def commit(self):
         pass  # each execute() is auto-committed via HTTP
 
@@ -291,15 +314,32 @@ def import_questions():
         data = json.load(f)
 
     imported = 0
+    BATCH = 50 if USE_TURSO else 1
+
     for category, qs in [('singles', data['singles']), ('multis', data['multis']),
                           ('judges', data['judges']), ('others', data.get('others', []))]:
+        batch_params = []
         for q in qs:
-            db.execute(
+            batch_params.append((
+                q['type'], q['question_text'],
+                json.dumps(q['options'], ensure_ascii=False),
+                q['answer'], q.get('original_num')
+            ))
+            if len(batch_params) >= BATCH:
+                db.executemany(
+                    'INSERT INTO questions (qtype, question_text, options, answer, original_num) VALUES (?, ?, ?, ?, ?)',
+                    batch_params
+                )
+                imported += len(batch_params)
+                print(f"  Imported {imported} questions...")
+                batch_params = []
+
+        if batch_params:
+            db.executemany(
                 'INSERT INTO questions (qtype, question_text, options, answer, original_num) VALUES (?, ?, ?, ?, ?)',
-                (q['type'], q['question_text'], json.dumps(q['options'], ensure_ascii=False),
-                 q['answer'], q.get('original_num'))
+                batch_params
             )
-            imported += 1
+            imported += len(batch_params)
 
     db.commit()
     db.close()
