@@ -8,6 +8,8 @@ import json
 import os
 import sqlite3
 import random
+import urllib.request
+import urllib.error
 from functools import wraps
 from datetime import datetime
 
@@ -25,31 +27,184 @@ app.secret_key = 'cross-border-theory-2026-secret-key-change-in-production'
 
 QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cleaned_questions.json')
 
-# Turso (cloud SQLite) for production; falls back to local SQLite for dev
+# Turso (cloud SQLite) via HTTP API — zero native deps, pure Python
 TURSO_URL = os.environ.get('TURSO_DATABASE_URL', '')
 TURSO_TOKEN = os.environ.get('TURSO_AUTH_TOKEN', '')
-
-try:
-    import libsql_experimental as libsql
-    _HAVE_LIBSQL = True
-except ImportError:
-    libsql = None
-    _HAVE_LIBSQL = False
-
-USE_TURSO = bool(_HAVE_LIBSQL and TURSO_URL and TURSO_TOKEN)
+USE_TURSO = bool(TURSO_URL and TURSO_TOKEN)
 
 # Local SQLite fallback
 DATA_DIR = os.environ.get('RENDER_DISK_PATH', os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(DATA_DIR, exist_ok=True)
 DATABASE = os.path.join(DATA_DIR, 'quiz.db')
 
+if USE_TURSO:
+    _host = TURSO_URL.split("://", 1)[-1]
+    TURSO_PIPELINE = f"https://{_host}/v2/pipeline"
+else:
+    TURSO_PIPELINE = None
+
+
+class _Row:
+    """Tuple wrapper that supports dict-like column-name access (like sqlite3.Row)."""
+    __slots__ = ('_cols', '_vals', '_idx')
+
+    def __init__(self, columns, values):
+        self._cols = columns
+        self._vals = values
+        self._idx = {c: i for i, c in enumerate(columns)}
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._vals[key]
+        return self._vals[self._idx[key]]
+
+    def keys(self):
+        return self._cols
+
+    def __iter__(self):
+        return iter(self._cols)
+
+    def __len__(self):
+        return len(self._vals)
+
+
+class _TursoHTTPCursor:
+    """Cursor backed by a pre-fetched Turso HTTP API result."""
+    def __init__(self, result):
+        self._rows = []
+        self._cols = []
+        self._idx = 0
+
+        if result is not None:
+            self._cols = [c["name"] for c in result.get("cols", [])]
+            raw_rows = result.get("rows", [])
+            self._rows = [
+                tuple(self._extract(cell) for cell in row)
+                for row in raw_rows
+            ]
+        self.description = tuple((c,) for c in self._cols)
+
+    @staticmethod
+    def _extract(cell):
+        if cell is None:
+            return None
+        if not isinstance(cell, dict):
+            return cell
+        v = cell.get("value")
+        if v is None:
+            return None
+        t = cell.get("type")
+        if t == "integer":
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                return v
+        if t == "float":
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return v
+        return v  # text, blob, or unknown
+
+    def _wrap(self, row):
+        if row is None:
+            return None
+        return _Row(self._cols, row)
+
+    def fetchone(self):
+        if self._idx >= len(self._rows):
+            return None
+        row = self._rows[self._idx]
+        self._idx += 1
+        return self._wrap(row)
+
+    def fetchall(self):
+        result = [self._wrap(r) for r in self._rows[self._idx:]]
+        self._idx = len(self._rows)
+        return result
+
+    def fetchmany(self, size=None):
+        if size is None:
+            return self.fetchall()
+        end = min(self._idx + size, len(self._rows))
+        result = [self._wrap(r) for r in self._rows[self._idx:end]]
+        self._idx = end
+        return result
+
+
+class _TursoHTTPConnection:
+    """Database connection backed by Turso HTTP API (urllib, zero deps)."""
+    def __init__(self, pipeline_url, token):
+        self._url = pipeline_url
+        self._headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+    @staticmethod
+    def _to_arg(v):
+        """Convert a Python value to a Turso typed-arg dict."""
+        if v is None:
+            return {"type": "null"}
+        if isinstance(v, bool):
+            return {"type": "integer", "value": "1" if v else "0"}
+        if isinstance(v, int):
+            return {"type": "integer", "value": str(v)}
+        if isinstance(v, float):
+            return {"type": "float", "value": str(v)}
+        if isinstance(v, bytes):
+            import base64
+            return {"type": "blob", "value": base64.b64encode(v).decode()}
+        return {"type": "text", "value": str(v)}
+
+    def execute(self, sql, params=None):
+        if params is None:
+            params = ()
+        elif not isinstance(params, (list, tuple)):
+            params = (params,)
+
+        args = [self._to_arg(p) for p in params]
+        body = json.dumps({
+            "requests": [
+                {"type": "execute", "stmt": {"sql": sql, "args": args}}
+            ]
+        }).encode("utf-8")
+
+        req = urllib.request.Request(self._url, data=body, headers=self._headers)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            raise RuntimeError(f"Turso HTTP {e.code}: {body[:500]}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Turso unreachable: {e.reason}")
+
+        results = data.get("results", [])
+        if not results:
+            return _TursoHTTPCursor(None)
+
+        r = results[0]
+        rtype = r.get("type", "")
+        if rtype != "ok":
+            raise RuntimeError(f"Turso error: {r}")
+
+        resp_obj = r.get("response", {})
+        if resp_obj.get("type") == "execute":
+            return _TursoHTTPCursor(resp_obj.get("result", {}))
+        return _TursoHTTPCursor(None)
+
+    def commit(self):
+        pass  # each execute() is auto-committed via HTTP
+
+    def close(self):
+        pass
+
 
 def connect_db():
-    """Return a database connection (Turso or local SQLite)."""
+    """Return a database connection (Turso HTTP API or local SQLite)."""
     if USE_TURSO:
-        conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return _TursoHTTPConnection(TURSO_PIPELINE, TURSO_TOKEN)
     else:
         conn = sqlite3.connect(DATABASE)
         conn.row_factory = sqlite3.Row
