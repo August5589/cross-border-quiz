@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}极速备考 - 跨境理论题刷题系统{% endblock %}
+
+{% block content %}
+<div class="cram-header">
+    <h1>⚡ 极速备考</h1>
+    <p class="cram-subtitle">共 {{ total_questions }} 道真题，直接查看正确答案，快速过知识点</p>
+</div>
+
+{% if questions %}
+<div class="cram-list">
+    {% for q in questions %}
+    <div class="cram-card">
+        <div class="cram-num">{{ q.num }}</div>
+        <div class="cram-body">
+            <div class="cram-question">{{ q.question }}</div>
+            <div class="cram-answer">
+                <span class="cram-answer-label">答案：</span>
+                <span class="cram-answer-text">{{ q.answer }}</span>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="pagination">
+    <div class="pagination-inner">
+        {% if page > 1 %}
+        <a href="{{ url_for('cram', page=page-1) }}" class="page-btn">上一页</a>
+        {% else %}
+        <span class="page-btn disabled">上一页</span>
+        {% endif %}
+        <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
+        {% if page < total_pages %}
+        <a href="{{ url_for('cram', page=page+1) }}" class="page-btn">下一页</a>
+        {% else %}
+        <span class="page-btn disabled">下一页</span>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>暂无真题数据</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -26,6 +26,8 @@ app.secret_key = 'cross-border-theory-2026-secret-key-change-in-production'
 # ── Database connection ────────────────────────────────────
 
 QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cleaned_questions.json')
+CRAM_FILE_A = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'question_database.json')
+CRAM_FILE_B = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'supplementary_questions.json')
 
 # Turso (cloud SQLite) via HTTP API — zero native deps, pure Python
 TURSO_URL = os.environ.get('TURSO_DATABASE_URL', '')
@@ -238,6 +240,68 @@ def connect_db():
 
 PER_PAGE = 5
 EXAM_SIZE = 100
+CRAM_PER_PAGE = 20
+
+
+# ── Cram (极速备考) question loader ────────────────────────
+
+def _load_cram_questions():
+    """Load + merge cram question files, mapping answers to text."""
+    questions = []
+
+    for fpath in (CRAM_FILE_A, CRAM_FILE_B):
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        questions.extend(data)
+
+    result = []
+    for i, q in enumerate(questions):
+        qtype = q.get('type', '')
+        answer = q.get('answer', '').strip().upper()
+        options = q.get('options', [])
+
+        # Map answer letter(s) → actual text
+        answer_text = ''
+        if '判断' in qtype:
+            answer_text = '对' if answer in ('A', '√', '对', '正确') else '错'
+        elif '多选' in qtype:
+            # Multi-choice: "ABCD" → map each letter to option text
+            parts = []
+            for ch in answer:
+                idx = ord(ch) - ord('A') if 'A' <= ch <= 'Z' else -1
+                if 0 <= idx < len(options):
+                    opt = str(options[idx]).strip()
+                    if len(opt) > 2 and opt[1] in ('.', '、', '．') and opt[0].isascii() and opt[0].isalpha():
+                        opt = opt[2:].strip()
+                    parts.append(opt)
+            answer_text = '；'.join(parts) if parts else answer
+        else:
+            # Single choice or unknown — map first letter
+            first = answer[0] if answer else ''
+            idx = ord(first) - ord('A') if first and 'A' <= first <= 'Z' else -1
+            if 0 <= idx < len(options):
+                opt = str(options[idx]).strip()
+                if len(opt) > 2 and opt[1] in ('.', '、', '．') and opt[0].isascii() and opt[0].isalpha():
+                    opt = opt[2:].strip()
+                answer_text = opt
+            else:
+                answer_text = answer
+
+        result.append({
+            'num': q.get('number', i + 1),
+            'type': qtype,
+            'question': q.get('question', ''),
+            'answer': answer_text,
+        })
+
+    return result
+
+
+CRAM_QUESTIONS = _load_cram_questions()
+CRAM_TOTAL_PAGES = max(1, (len(CRAM_QUESTIONS) + CRAM_PER_PAGE - 1) // CRAM_PER_PAGE)
 
 
 # ── Database ──────────────────────────────────────────────
@@ -622,6 +686,34 @@ def wrong_check_answer():
         'wrong_count': wrong_count,
         'removed': is_correct,
     })
+
+
+# ── Routes: Cram (极速备考) ──────────────────────────────
+
+@app.route('/cram')
+@login_required
+def cram():
+    user = get_current_user()
+    db = get_db()
+    page = request.args.get('page', 1, type=int)
+    page = max(1, min(page, CRAM_TOTAL_PAGES))
+    start = (page - 1) * CRAM_PER_PAGE
+    end = start + CRAM_PER_PAGE
+    questions = CRAM_QUESTIONS[start:end]
+
+    wrong_count = db.execute(
+        'SELECT COUNT(*) FROM wrong_questions WHERE user_id = ?', (user['id'],)
+    ).fetchone()[0]
+    type_counts = {}
+    for t in ['single', 'multi', 'judge']:
+        type_counts[t] = db.execute('SELECT COUNT(*) FROM questions WHERE qtype = ?', (t,)).fetchone()[0]
+
+    return render_template('cram.html',
+                           questions=questions, page=page,
+                           total_pages=CRAM_TOTAL_PAGES,
+                           total_questions=len(CRAM_QUESTIONS),
+                           wrong_count=wrong_count, type_counts=type_counts,
+                           user=user)
 
 
 # ── Routes: Exam ──────────────────────────────────────────

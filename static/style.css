@@ -364,3 +364,77 @@ body {
     .main-content { margin-left: 60px; padding: 20px 16px; }
     .form-row { flex-direction: column; }
 }
+
+/* ── Cram (极速备考) ──────────────────────────── */
+.cram-header {
+    margin-bottom: 24px;
+}
+.cram-header h1 {
+    font-size: 1.5rem;
+    color: var(--gray-800);
+    margin-bottom: 4px;
+}
+.cram-subtitle {
+    color: var(--gray-500);
+    font-size: .9rem;
+}
+
+.cram-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cram-card {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    padding: 16px 20px;
+    transition: border-color .15s;
+}
+.cram-card:hover {
+    border-color: var(--primary);
+}
+
+.cram-num {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    background: var(--primary-light);
+    color: var(--primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: .85rem;
+}
+
+.cram-body {
+    flex: 1;
+    min-width: 0;
+}
+.cram-question {
+    font-size: .95rem;
+    color: var(--gray-800);
+    line-height: 1.6;
+    margin-bottom: 8px;
+}
+.cram-answer {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+}
+.cram-answer-label {
+    font-weight: 600;
+    color: var(--success);
+    font-size: .85rem;
+    white-space: nowrap;
+}
+.cram-answer-text {
+    color: var(--success);
+    font-size: .9rem;
+    line-height: 1.5;
+}

@@ -27,6 +27,9 @@
                 <a href="{{ url_for('exam_page') }}" class="nav-item {% if request.endpoint == 'exam_page' %}active{% endif %}">
                     <span class="nav-icon">📋</span> 考试模式
                 </a>
+                <a href="{{ url_for('cram') }}" class="nav-item {% if request.endpoint == 'cram' %}active{% endif %}">
+                    <span class="nav-icon">⚡</span> 极速备考
+                </a>
                 {% if user and user['is_admin'] %}
                 <a href="{{ url_for('admin_panel') }}" class="nav-item {% if request.endpoint == 'admin_panel' %}active{% endif %}">
                     <span class="nav-icon">⚙️</span> 管理后台
