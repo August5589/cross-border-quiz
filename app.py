@@ -26,8 +26,8 @@ app.secret_key = 'cross-border-theory-2026-secret-key-change-in-production'
 # ── Database connection ────────────────────────────────────
 
 QUESTIONS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cleaned_questions.json')
-CRAM_FILE_A = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'question_database.json')
-CRAM_FILE_B = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'supplementary_questions.json')
+CRAM_FILE_A = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'question_database.json')
+CRAM_FILE_B = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'supplementary_questions.json')
 
 # Turso (cloud SQLite) via HTTP API — zero native deps, pure Python
 TURSO_URL = os.environ.get('TURSO_DATABASE_URL', '')
