@@ -367,15 +367,30 @@ def init_db():
 
 
 def import_questions():
-    """Import questions from cleaned JSON into SQLite."""
+    """Import questions from cleaned JSON into SQLite.
+    If the question count in DB differs from the JSON, clear and re-import.
+    """
     db = connect_db()
-    count = db.execute('SELECT COUNT(*) FROM questions').fetchone()[0]
-    if count > 0:
-        db.close()
-        return count  # Already imported
 
+    # Count questions in JSON
     with open(QUESTIONS_JSON, 'r', encoding='utf-8') as f:
         data = json.load(f)
+
+    json_total = sum(len(data.get(cat, [])) for cat in ('singles', 'multis', 'judges', 'others'))
+
+    db_count = db.execute('SELECT COUNT(*) FROM questions').fetchone()[0]
+
+    if db_count == json_total and db_count > 0:
+        db.close()
+        return db_count  # Already up to date
+
+    # Count mismatch — clear and re-import
+    if db_count > 0:
+        print(f"  DB has {db_count} questions, JSON has {json_total}. Re-importing...")
+        db.execute('DELETE FROM wrong_questions')
+        db.execute('DELETE FROM user_answers')
+        db.execute('DELETE FROM questions')
+        db.commit()
 
     imported = 0
     BATCH = 50 if USE_TURSO else 1
