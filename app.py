@@ -802,6 +802,9 @@ def exam_submit():
 
     correct_count = 0
     results = []
+    answer_batch = []
+    wrong_inserts = []
+    wrong_deletes = []
 
     for q in questions:
         user_answer = answers.get(str(q['id']), '').strip().upper()
@@ -815,21 +818,15 @@ def exam_submit():
         if is_correct:
             correct_count += 1
 
-        # Record answer
-        db.execute(
-            'INSERT INTO user_answers (user_id, question_id, user_answer, is_correct, mode) VALUES (?, ?, ?, ?, ?)',
+        # Collect for batch write
+        answer_batch.append(
             (user_id, q['id'], user_answer, 1 if is_correct else 0, 'exam')
         )
 
-        # Update wrong_questions
         if is_correct:
-            db.execute('DELETE FROM wrong_questions WHERE user_id = ? AND question_id = ?',
-                       (user_id, q['id']))
+            wrong_deletes.append((user_id, q['id']))
         else:
-            db.execute(
-                'INSERT OR IGNORE INTO wrong_questions (user_id, question_id) VALUES (?, ?)',
-                (user_id, q['id'])
-            )
+            wrong_inserts.append((user_id, q['id']))
 
         results.append({
             'question_id': q['id'],
@@ -840,6 +837,30 @@ def exam_submit():
             'correct_answer': q['answer'],
             'is_correct': is_correct,
         })
+
+    # Batch write user_answers
+    db.executemany(
+        'INSERT INTO user_answers (user_id, question_id, user_answer, is_correct, mode) VALUES (?, ?, ?, ?, ?)',
+        answer_batch
+    )
+
+    # Batch delete correct answers from wrong_questions
+    if wrong_deletes:
+        placeholders = ','.join('?' * len(wrong_deletes))
+        # Build pairs of (user_id, question_id) for WHERE clause
+        pair_placeholders = ','.join(f'(?,?)' for _ in wrong_deletes)
+        flat = [v for pair in wrong_deletes for v in pair]
+        db.execute(
+            f'DELETE FROM wrong_questions WHERE (user_id, question_id) IN ({pair_placeholders})',
+            flat
+        )
+
+    # Batch insert wrong answers
+    if wrong_inserts:
+        db.executemany(
+            'INSERT OR IGNORE INTO wrong_questions (user_id, question_id) VALUES (?, ?)',
+            wrong_inserts
+        )
 
     db.commit()
 
