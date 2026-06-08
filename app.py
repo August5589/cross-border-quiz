@@ -774,6 +774,7 @@ def exam_submit():
     user_id = session['user_id']
     data = request.json
     answers = data.get('answers', {})  # {question_id: user_answer}
+    elapsed_seconds = data.get('elapsed_seconds', 0)
 
     if not answers:
         return jsonify({'error': 'No answers submitted'}), 400
@@ -834,6 +835,7 @@ def exam_submit():
         'score': score,
         'correct_count': correct_count,
         'total': total,
+        'elapsed_seconds': elapsed_seconds,
         'results': results,
     })
 

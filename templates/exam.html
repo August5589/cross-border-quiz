@@ -23,6 +23,7 @@
 <div id="exam-content" style="display:none;">
     <div class="exam-header">
         <span id="exam-progress">已答：0 / 0</span>
+        <span id="exam-timer" class="exam-timer">⏱ 00:00</span>
         <button class="btn btn-danger" onclick="submitExam()">交 卷</button>
     </div>
     <div class="questions-list" id="exam-questions"></div>
@@ -35,6 +36,19 @@
 <script>
 let examQuestions = [];
 let examSubmitted = false;
+let examStartTime = null;
+let examTimerInterval = null;
+
+function formatTime(totalSeconds) {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+}
+
+function getElapsedSeconds() {
+    if (!examStartTime) return 0;
+    return Math.floor((Date.now() - examStartTime) / 1000);
+}
 
 function startExam() {
     document.getElementById('exam-intro').style.display = 'none';
@@ -46,6 +60,11 @@ function startExam() {
         renderExam();
         document.getElementById('exam-content').style.display = 'block';
         document.getElementById('exam-progress').textContent = '已答：0 / ' + examQuestions.length;
+        // Start timer
+        examStartTime = Date.now();
+        examTimerInterval = setInterval(function() {
+            document.getElementById('exam-timer').textContent = '⏱ ' + formatTime(getElapsedSeconds());
+        }, 1000);
         updateProgress();
     });
 }
@@ -102,6 +121,8 @@ function submitExam() {
     }
 
     examSubmitted = true;
+    if (examTimerInterval) { clearInterval(examTimerInterval); }
+    const finalElapsed = getElapsedSeconds();
 
     // Collect answers
     const answers = {};
@@ -118,7 +139,7 @@ function submitExam() {
     fetch('/exam/submit', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({answers: answers})
+        body: JSON.stringify({answers: answers, elapsed_seconds: finalElapsed})
     })
     .then(r => r.json())
     .then(data => {
@@ -139,6 +160,7 @@ function showResult(data) {
             <span class="score-label">分</span>
         </div>
         <p class="score-detail">答对 <strong>${data.correct_count}</strong> / ${data.total} 题</p>
+        <p class="score-detail">⏱ 用时 <strong>${formatTime(data.elapsed_seconds || finalElapsed)}</strong></p>
         <a href="/exam" class="btn btn-primary">重新考试</a>
         <a href="/practice" class="btn btn-outline">返回练习</a>
     </div>

@@ -285,6 +285,12 @@ body {
     z-index: 10;
 }
 #exam-progress { font-weight: 600; color: var(--gray-700); }
+.exam-timer {
+    font-weight: 700; font-size: 1.1rem; color: var(--primary);
+    font-variant-numeric: tabular-nums; letter-spacing: 1px;
+    background: var(--primary-light); padding: 4px 14px;
+    border-radius: 20px;
+}
 
 .exam-card { }
 
